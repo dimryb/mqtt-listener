@@ -1,20 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"io/ioutil"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 )
-
-var clientID string = "myClientID"
-var brokerURL string = "tcp://localhost:1883" // Замените на IP адрес или домен вашего брокера MQTT
-var username string = ""
-var password string = ""
-
-const topicName = "myTopic"
 
 func onMessage(client mqtt.Client, msg mqtt.Message) {
 	fmt.Printf("Message arrived: %s from topic: %s\n", msg.Payload(), msg.Topic())
@@ -35,16 +31,81 @@ func setupInterrupt() {
 	}()
 }
 
-func main() {
-	opts := mqtt.NewClientOptions().AddBroker(brokerURL)
-	if username != "" && password != "" {
-		opts.SetUsername(username)
-		opts.SetPassword(password)
+// Config - структура для хранения конфигурации
+type Config struct {
+	BrokerURL string `json:"brokerURL"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	ClientID  string `json:"clientID"`
+	KeepAlive int    `json:"keepAlive"`
+	TopicName string `json:"topicName"`
+}
+
+// LoadConfig - функция для загрузки конфигурации из файла
+func LoadConfig(configFile string) (*Config, error) {
+	// Конфигурация по умолчанию
+	config := Config{
+		BrokerURL: "tcp://localhost:1883",
+		Username:  "",
+		Password:  "",
+		ClientID:  "myClientID",
+		KeepAlive: 60, // Значение по умолчанию для keepAlive
+		TopicName: "myTopic",
 	}
-	opts.SetClientID(clientID)
+
+	// Создаем файл конфигурации, если он еще не существует
+	if _, err := os.Stat(configFile); os.IsNotExist(err) {
+		// Создаем новый файл конфигурации
+		configFile, err := os.Create(configFile)
+		if err != nil {
+			log.Fatalf("Failed to create config file: %v", err)
+		}
+		defer configFile.Close()
+
+		// Преобразуем конфигурацию в JSON и записываем в файл
+		jsonData, err := json.MarshalIndent(config, "", "    ")
+		if err != nil {
+			log.Fatalf("Failed to marshal config to JSON: %v", err)
+		}
+		if _, err := configFile.Write(jsonData); err != nil {
+			log.Fatalf("Failed to write config to file: %v", err)
+		}
+	}
+
+	// Чтение файла конфигурации
+	configFileContent, err := ioutil.ReadFile(configFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %v", err)
+	}
+
+	// Декодирование JSON в структуру Config
+	err = json.Unmarshal(configFileContent, &config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode JSON: %v", err)
+	}
+
+	return &config, nil
+}
+
+func main() {
+	// Загрузка конфигурации
+	configFile := "config.json"
+	config, err := LoadConfig(configFile)
+	if err != nil {
+		fmt.Println("Error loading config:", err)
+		os.Exit(1)
+	}
+
+	opts := mqtt.NewClientOptions().AddBroker(config.BrokerURL)
+	if config.Username != "" && config.Password != "" {
+		opts.SetUsername(config.Username)
+		opts.SetPassword(config.Password)
+	}
+	opts.SetClientID(config.ClientID)
+	opts.SetKeepAlive(time.Second * time.Duration(config.KeepAlive))
 	opts.OnConnect = func(c mqtt.Client) {
 		fmt.Println("Connected to MQTT Broker!")
-		token := c.Subscribe(topicName, 0, onMessage)
+		token := c.Subscribe(config.TopicName, 0, onMessage)
 		token.Wait()
 	}
 	opts.OnConnectionLost = func(c mqtt.Client, err error) {
