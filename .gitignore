@@ -1,0 +1,4 @@
+/.idea
+/go.sum
+/config.json
+/mqtt-listener.exe
