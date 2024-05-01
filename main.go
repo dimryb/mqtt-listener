@@ -3,6 +3,9 @@ package main
 import (
 	"fmt"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -15,6 +18,21 @@ const topicName = "myTopic"
 
 func onMessage(client mqtt.Client, msg mqtt.Message) {
 	fmt.Printf("Message arrived: %s from topic: %s\n", msg.Payload(), msg.Topic())
+}
+
+func setupInterrupt() {
+	// Создание канала для сигналов типа os.Signal. Канал имеет емкость 1.
+	c := make(chan os.Signal, 1)
+
+	// Регистрация сигнала SIGINT (обычно генерируется Ctrl+C) для канала c.
+	signal.Notify(c, syscall.SIGINT)
+	// Начало новой горутины (асинхронного потока выполнения).
+	go func() {
+		// Блокировка текущей горутины до тех пор, пока не поступит сигнал через канал c.
+		<-c
+		fmt.Println("Программа прервана пользователем")
+		os.Exit(0) // Нормально завершаем программу
+	}()
 }
 
 func main() {
@@ -38,5 +56,8 @@ func main() {
 		panic(token.Error())
 	}
 
-	<-time.After(1 * time.Second) // Ожидание для демонстрации получения сообщений
+	setupInterrupt()
+	for {
+		time.Sleep(time.Second) // Просто ждем секунду
+	}
 }
